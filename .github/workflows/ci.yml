@@ -209,6 +209,73 @@ jobs:
       - name: CLI integration tests
         run: pytest -m cli_integration
 
+      - name: Official Action smoke
+        id: gac-action
+        uses: ./
+        with:
+          config: sample/governance.example.yaml
+          operation: plan
+          pr-comment: "false"
+          output-directory: .governance-ci-action
+          plan-path: .governance-ci-action/governance.gplan
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/governance_demo
+          COLLIBRA_MODE: mock
+
+      - name: Assert Action outputs
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          test "${{ steps.gac-action.outputs.status }}" = "passed"
+          test "${{ steps.gac-action.outputs.validation-status }}" = "passed"
+          test "${{ steps.gac-action.outputs.policy-status }}" = "passed"
+          test "${{ steps.gac-action.outputs.plan-status }}" = "generated"
+          test "${{ steps.gac-action.outputs.writes-performed }}" = "0"
+          test "${{ steps.gac-action.outputs.comment-status }}" = "disabled"
+          test -f "${{ steps.gac-action.outputs.plan-path }}"
+          test -f "${{ steps.gac-action.outputs.result-path }}"
+          test -f "${{ steps.gac-action.outputs.report-path }}"
+          case "${{ steps.gac-action.outputs.plan-path }}" in
+            "${{ steps.gac-action.outputs.artifacts-path }}"/*) ;;
+            *) echo "plan-path not under artifacts-path"; exit 1 ;;
+          esac
+          python -c "import json; p=json.load(open('${{ steps.gac-action.outputs.result-path }}',encoding='utf-8')); assert p['result_schema']=='governance-action-result'; assert p['result_version']=='1'; assert p['execution']['writes_performed']==0; assert 'reporting_failure' not in str(p.get('failure_code'))"
+
+      - name: Official Action blocked smoke
+        id: gac-action-blocked
+        continue-on-error: true
+        uses: ./
+        with:
+          config: tests/fixtures/github_action/governance.blocked.yaml
+          operation: check
+          fail-on-policy-error: "true"
+          pr-comment: "false"
+          output-directory: .governance-ci-blocked
+          plan-path: .governance-ci-blocked/governance.gplan
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/governance_demo
+          COLLIBRA_MODE: mock
+
+      - name: Assert blocked Action finalization
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          test "${{ steps.gac-action-blocked.outcome }}" = "failure"
+          test "${{ steps.gac-action-blocked.outputs.status }}" = "blocked"
+          test "${{ steps.gac-action-blocked.outputs.policy-status }}" = "blocked"
+          test "${{ steps.gac-action-blocked.outputs.writes-performed }}" = "0"
+          test "${{ steps.gac-action-blocked.outputs.comment-status }}" = "disabled"
+          test -n "${{ steps.gac-action-blocked.outputs.result-path }}"
+          test -n "${{ steps.gac-action-blocked.outputs.report-path }}"
+          test -n "${{ steps.gac-action-blocked.outputs.artifacts-path }}"
+          test -f "${{ steps.gac-action-blocked.outputs.result-path }}"
+          test -f "${{ steps.gac-action-blocked.outputs.report-path }}"
+          python -c "import json; p=json.load(open('${{ steps.gac-action-blocked.outputs.result-path }}',encoding='utf-8')); assert p['status']=='blocked'; assert p['failure_code']=='policy_blocked'; assert p['execution']['writes_performed']==0"
+
+      - name: Cleanup Action smoke artifacts
+        if: ${{ always() }}
+        run: rm -rf .governance-ci-action .governance-ci-blocked
+
       - name: Teardown
         if: always()
         run: docker compose down -v

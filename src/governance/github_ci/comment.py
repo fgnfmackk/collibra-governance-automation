@@ -213,3 +213,9 @@ def main() -> int:
         print("unable to read governance report for comment", file=sys.stderr)
         write_github_output({"comment-status": "failed"})
         return 0
+    except Exception:
+        # Transport / JSON / unexpected client failures must still write outputs and
+        # exit 0 so finalize + fail-gate own the hard failure.
+        print("pull request comment delivery failed", file=sys.stderr)
+        write_github_output({"comment-status": "failed"})
+        return 0
