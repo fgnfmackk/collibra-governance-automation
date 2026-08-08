@@ -4,6 +4,10 @@
 
 ### Added
 
+- Official root composite GitHub Action (`action.yml`) for read-only Governance-as-Code review workflows (`validate` / `check` / `plan`)
+- Packaged `governance-action-result` v1 machine contract and Action orchestration under `governance.github_ci`
+- Deterministic Markdown reports, `GITHUB_STEP_SUMMARY`, and bounded workflow annotations for CI review
+- Opt-in sticky pull request comments with fork-safe defaults and least-privilege permissions
 - Governance-as-Code foundation: optional `governance.yaml` v1 contract with packaged JSON Schema, profile overlays, and `governance config validate`
 - Canonical `GovernanceSnapshot` artifact (`export --artifact snapshot`) distinct from the v1.0 metadata inventory
 - Versioned content identities (`config_identity`, `snapshot_identity`, `mapping_identity`) using SHA-256 with domain separation
