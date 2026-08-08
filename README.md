@@ -290,18 +290,126 @@ plan = build_sync_plan(desired, remote)
 dry_run = execute_sync_plan(adapter, plan, apply=False)
 ```
 
+## GitHub Action (Governance as Code)
+
+Official composite Action at the repository root (`action.yml`). Supported runners for v1: **GitHub-hosted Linux/Ubuntu** only.
+
+The Action installs this package into a fresh Action-owned virtualenv under `RUNNER_TEMP`, then runs the governance CLI with isolated Python (`python -I -m ...`). Consumer site-packages are not modified. Relative config paths resolve against `GITHUB_WORKSPACE` (the consumer must checkout their repository before `uses:`).
+
+**Writes performed: always 0.** The Action never calls `governance apply` or mutating `sync`.
+
+### Inputs (v1)
+
+| Input | Default | Notes |
+| --- | --- | --- |
+| `config` | required | Workspace-relative path to `governance.yaml` |
+| `profile` | `""` | Forwarded as `--profile` when non-empty |
+| `operation` | `plan` | `validate` \| `check` \| `plan` (Action mode, not Collibra `--mode`) |
+| `output-format` | `human` | Console only (`human` \| `json`); does not change artifacts or step summary |
+| `fail-on-policy-error` | `"true"` | Final gate exits `3` when status is blocked |
+| `output-directory` | `.governance` | Artifact root; must stay inside the workspace |
+| `plan-path` | `.governance/governance.gplan` | Must be under `output-directory` |
+| `pr-comment` | `"false"` | Opt-in sticky PR comment |
+| `github-token` | `""` | Comment step only; never passed to governance CLI |
+
+Provider credentials are **not** Action inputs. They remain environment variables referenced by governance.yaml `*_env` keys.
+
+### A. Fork-safe validation
+
+```yaml
+name: Governance validate
+on: pull_request
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: fgnfmackk/collibra-governance-automation@<commit-sha>
+        with:
+          config: governance.yaml
+          operation: validate
+          pr-comment: "false"
+```
+
+Do not use `pull_request_target` with an untrusted PR checkout and secrets.
+
+### B. Governance check
+
+`operation: check` evaluates policies against a PostgreSQL source. Set `DATABASE_URL` (or the discrete connection env vars from your config). No Collibra I/O is required for check.
+
+### C. Trusted deterministic planning
+
+For live remote reads, inject provider env vars only after an explicit same-repository guard:
+
+```yaml
+- name: Plan (same repository only)
+  if: github.event.pull_request.head.repo.full_name == github.repository
+  uses: fgnfmackk/collibra-governance-automation@<commit-sha>
+  with:
+    config: governance.yaml
+    operation: plan
+    pr-comment: "false"
+  env:
+    DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    COLLIBRA_MODE: mock
+    # Live reads: COLLIBRA_BASE_URL / credentials via env refs in governance.yaml
+```
+
+Still zero remote writes.
+
+### D. Artifact upload
+
+```yaml
+- uses: actions/upload-artifact@v4
+  if: always()
+  with:
+    name: governance-action
+    path: ${{ steps.gac.outputs.artifacts-path }}
+```
+
+Prefer uploading the Action `artifacts-path` directory so a missing `.gplan` on blocked runs does not break the upload. Pin `upload-artifact` by full commit SHA in production workflows.
+
+### E. Optional sticky comment
+
+```yaml
+permissions:
+  contents: read
+  pull-requests: write
+# ...
+- uses: fgnfmackk/collibra-governance-automation@<commit-sha>
+  with:
+    config: governance.yaml
+    operation: plan
+    pr-comment: "true"
+    github-token: ${{ github.token }}
+```
+
+Fork PRs skip commenting (`comment-status=skipped_untrusted_fork`). Missing token on a trusted PR fails the Action with `comment-status=failed` after governance artifacts are written. The Action uses `GITHUB_API_URL` for GitHub Enterprise Server compatibility.
+
+### F. Version pinning
+
+- Strongest: pin the Action to a full immutable commit SHA.
+- After a separate release that bumps the package to `1.1.0` and creates tag `v1.1.0`, consumers may pin that immutable SemVer tag.
+- Do not use mutable `@main`.
+- This repository state remains package `1.0.0`; it does not create release tags.
+- The Action ref pins Action metadata and the Python package installed from `GITHUB_ACTION_PATH` together.
+
 ## Repository structure
 
 ```text
+action.yml                  official composite GitHub Action
 src/governance/
-  domain/                 vendor-neutral governance model
-  scanner/                PostgreSQL metadata discovery
-  exporters/              deterministic inventory JSON
-  integrations/collibra/  mapping, adapters, sync planning
-  cli.py                  argparse CLI orchestration
+  domain/                   vendor-neutral governance model
+  scanner/                  PostgreSQL metadata discovery
+  exporters/                deterministic inventory JSON
+  integrations/collibra/    mapping, adapters, sync planning
+  github_ci/                Action runner, reporting, sticky comments
+  cli.py                    argparse CLI orchestration
 tests/
-sample/                   demo SQL, verification helper, mapping example
-.github/workflows/        CI quality gates
+sample/                     demo SQL, verification helper, mapping example
+.github/workflows/          CI quality gates
 ```
 
 ## Testing and CI
@@ -330,7 +438,7 @@ CI defines seven `ubuntu-latest` jobs:
 - `postgres-integration`
 - `metadata-integration`
 - `collibra-integration`
-- `cli-integration`
+- `cli-integration` (includes official Action `uses: ./` PASS and BLOCKED smokes)
 
 No commercial Collibra tenant, self-hosted runners, or OS matrix is required.
 

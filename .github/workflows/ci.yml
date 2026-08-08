@@ -92,7 +92,7 @@ jobs:
           python -c "from governance.scanner import MetadataDiscoveryError, PostgresMetadataScanner"
           python -c "from governance.exporters import INVENTORY_SCHEMA, INVENTORY_VERSION, SCANNER_CONTRACT_VERSION, InventoryExportError, MetadataInventory, write_inventory"
           python -c "from governance.integrations.collibra import CollibraAdapterError, CollibraDesiredState, CollibraRemoteState, LiveCollibraAdapter, MockCollibraAdapter, SyncPlan, SyncResult, build_collibra_adapter, build_sync_plan, execute_sync_plan, load_mapping_config_file, map_to_desired_state, mapping_contains_example_placeholders, mock_mapping_config"
-          python -c "from importlib.resources import files; c=files('governance.config_contract.schemas').joinpath('governance-config.v1.schema.json'); p=files('governance.policy.schemas').joinpath('governance-policy.v1.schema.json'); g=files('governance.plans.schemas').joinpath('governance-plan.v1.schema.json'); ct=c.read_text(encoding='utf-8'); pt=p.read_text(encoding='utf-8'); gt=g.read_text(encoding='utf-8'); assert c.is_file() and p.is_file() and g.is_file(); assert 'urn:collibra-governance-automation:schema:governance-config:1' in ct; assert 'urn:collibra-governance-automation:schema:governance-policy:1' in pt; assert 'urn:collibra-governance-automation:schema:governance-plan:1' in gt; assert 'schema_version' in ct; assert 'policy_version' in pt; assert 'plan_version' in gt"
+          python -c "from importlib.resources import files; c=files('governance.config_contract.schemas').joinpath('governance-config.v1.schema.json'); p=files('governance.policy.schemas').joinpath('governance-policy.v1.schema.json'); g=files('governance.plans.schemas').joinpath('governance-plan.v1.schema.json'); a=files('governance.github_ci.schemas').joinpath('governance-action-result.v1.schema.json'); ct=c.read_text(encoding='utf-8'); pt=p.read_text(encoding='utf-8'); gt=g.read_text(encoding='utf-8'); at=a.read_text(encoding='utf-8'); assert c.is_file() and p.is_file() and g.is_file() and a.is_file(); assert 'urn:collibra-governance-automation:schema:governance-config:1' in ct; assert 'urn:collibra-governance-automation:schema:governance-policy:1' in pt; assert 'urn:collibra-governance-automation:schema:governance-plan:1' in gt; assert 'urn:collibra-governance-automation:schema:governance-action-result:1' in at; assert 'schema_version' in ct; assert 'policy_version' in pt; assert 'plan_version' in gt; assert 'result_version' in at"
           python -c "from governance.policy import load_normalized_policies, evaluate_policies; from governance.plans import load_saved_plan, SavedGovernancePlan; from governance.integrations.collibra import PLANNER_CONTRACT_VERSION, normalize_base_url"
           governance --help
           test "$(governance --version)" = "governance 1.0.0"
@@ -208,6 +208,73 @@ jobs:
 
       - name: CLI integration tests
         run: pytest -m cli_integration
+
+      - name: Official Action smoke
+        id: gac-action
+        uses: ./
+        with:
+          config: sample/governance.example.yaml
+          operation: plan
+          pr-comment: "false"
+          output-directory: .governance-ci-action
+          plan-path: .governance-ci-action/governance.gplan
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/governance_demo
+          COLLIBRA_MODE: mock
+
+      - name: Assert Action outputs
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          test "${{ steps.gac-action.outputs.status }}" = "passed"
+          test "${{ steps.gac-action.outputs.validation-status }}" = "passed"
+          test "${{ steps.gac-action.outputs.policy-status }}" = "passed"
+          test "${{ steps.gac-action.outputs.plan-status }}" = "generated"
+          test "${{ steps.gac-action.outputs.writes-performed }}" = "0"
+          test "${{ steps.gac-action.outputs.comment-status }}" = "disabled"
+          test -f "${{ steps.gac-action.outputs.plan-path }}"
+          test -f "${{ steps.gac-action.outputs.result-path }}"
+          test -f "${{ steps.gac-action.outputs.report-path }}"
+          case "${{ steps.gac-action.outputs.plan-path }}" in
+            "${{ steps.gac-action.outputs.artifacts-path }}"/*) ;;
+            *) echo "plan-path not under artifacts-path"; exit 1 ;;
+          esac
+          python -c "import json; p=json.load(open('${{ steps.gac-action.outputs.result-path }}',encoding='utf-8')); assert p['result_schema']=='governance-action-result'; assert p['result_version']=='1'; assert p['execution']['writes_performed']==0; assert 'reporting_failure' not in str(p.get('failure_code'))"
+
+      - name: Official Action blocked smoke
+        id: gac-action-blocked
+        continue-on-error: true
+        uses: ./
+        with:
+          config: tests/fixtures/github_action/governance.blocked.yaml
+          operation: check
+          fail-on-policy-error: "true"
+          pr-comment: "false"
+          output-directory: .governance-ci-blocked
+          plan-path: .governance-ci-blocked/governance.gplan
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/governance_demo
+          COLLIBRA_MODE: mock
+
+      - name: Assert blocked Action finalization
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          test "${{ steps.gac-action-blocked.outcome }}" = "failure"
+          test "${{ steps.gac-action-blocked.outputs.status }}" = "blocked"
+          test "${{ steps.gac-action-blocked.outputs.policy-status }}" = "blocked"
+          test "${{ steps.gac-action-blocked.outputs.writes-performed }}" = "0"
+          test "${{ steps.gac-action-blocked.outputs.comment-status }}" = "disabled"
+          test -n "${{ steps.gac-action-blocked.outputs.result-path }}"
+          test -n "${{ steps.gac-action-blocked.outputs.report-path }}"
+          test -n "${{ steps.gac-action-blocked.outputs.artifacts-path }}"
+          test -f "${{ steps.gac-action-blocked.outputs.result-path }}"
+          test -f "${{ steps.gac-action-blocked.outputs.report-path }}"
+          python -c "import json; p=json.load(open('${{ steps.gac-action-blocked.outputs.result-path }}',encoding='utf-8')); assert p['status']=='blocked'; assert p['failure_code']=='policy_blocked'; assert p['execution']['writes_performed']==0"
+
+      - name: Cleanup Action smoke artifacts
+        if: ${{ always() }}
+        run: rm -rf .governance-ci-action .governance-ci-blocked
 
       - name: Teardown
         if: always()

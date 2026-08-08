@@ -1,0 +1,11 @@
+policy_schema: governance-policy
+policy_version: "1"
+
+policies:
+  - id: tables-require-owner
+    severity: error
+    description: Every table must have an owner.
+    rule:
+      type: require_owner
+      select:
+        kind: table

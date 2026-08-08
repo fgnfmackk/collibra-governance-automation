@@ -1,0 +1,23 @@
+{
+  "domain_ref": "mock:domain:governance",
+  "asset_type_refs": {
+    "database": "mock:asset-type:database",
+    "schema": "mock:asset-type:schema",
+    "table": "mock:asset-type:table",
+    "column": "mock:asset-type:column"
+  },
+  "relation_type_refs": {
+    "database_schema": "mock:relation-type:database-schema",
+    "schema_table": "mock:relation-type:schema-table",
+    "table_column": "mock:relation-type:table-column",
+    "table_fk": "mock:relation-type:table-fk"
+  },
+  "attribute_type_refs": {
+    "local_id": "mock:attribute-type:local-id",
+    "description": "mock:attribute-type:description",
+    "owner": "mock:attribute-type:owner",
+    "data_type": "mock:attribute-type:data-type",
+    "nullable": "mock:attribute-type:nullable",
+    "ordinal_position": "mock:attribute-type:ordinal-position"
+  }
+}

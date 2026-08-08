@@ -1,0 +1,215 @@
+name: Governance as Code
+description: >
+  Run read-only Governance-as-Code validation, policy checks, and change planning
+  with deterministic Action outputs, Markdown summaries, and optional sticky PR comments.
+author: fgnfmackk
+
+branding:
+  icon: check-circle
+  color: blue
+
+inputs:
+  config:
+    description: Workspace-relative path to governance.yaml
+    required: true
+  profile:
+    description: Optional governance.yaml profile name
+    required: false
+    default: ""
+  operation:
+    description: Action operation (validate, check, or plan)
+    required: false
+    default: plan
+  output-format:
+    description: Console surface only (human or json); does not alter artifacts
+    required: false
+    default: human
+  fail-on-policy-error:
+    description: When true, final gate exits 3 on policy blocked
+    required: false
+    default: "true"
+  output-directory:
+    description: Workspace-relative artifact root
+    required: false
+    default: .governance
+  plan-path:
+    description: Workspace-relative plan path; must be under output-directory
+    required: false
+    default: .governance/governance.gplan
+  pr-comment:
+    description: Opt-in sticky pull request comment
+    required: false
+    default: "false"
+  github-token:
+    description: Token for sticky comment step only
+    required: false
+    default: ""
+
+outputs:
+  contract-version:
+    description: Action result contract version
+    value: ${{ steps.final.outputs.contract-version }}
+  status:
+    description: Overall governance status
+    value: ${{ steps.final.outputs.status }}
+  validation-status:
+    description: Governance config validation status
+    value: ${{ steps.final.outputs.validation-status }}
+  policy-status:
+    description: Policy evaluation status
+    value: ${{ steps.final.outputs.policy-status }}
+  policy-violation-count:
+    description: Total policy violations
+    value: ${{ steps.final.outputs.policy-violation-count }}
+  policy-error-count:
+    description: Policy error violations
+    value: ${{ steps.final.outputs.policy-error-count }}
+  policy-warning-count:
+    description: Policy warning violations
+    value: ${{ steps.final.outputs.policy-warning-count }}
+  plan-status:
+    description: Plan stage status
+    value: ${{ steps.final.outputs.plan-status }}
+  create-count:
+    description: CREATE action count
+    value: ${{ steps.final.outputs.create-count }}
+  update-count:
+    description: UPDATE action count
+    value: ${{ steps.final.outputs.update-count }}
+  unchanged-count:
+    description: UNCHANGED action count
+    value: ${{ steps.final.outputs.unchanged-count }}
+  remote-only-count:
+    description: REMOTE_ONLY action count
+    value: ${{ steps.final.outputs.remote-only-count }}
+  writes-performed:
+    description: Remote writes performed (always 0)
+    value: ${{ steps.final.outputs.writes-performed }}
+  plan-path:
+    description: Relative path to generated plan, or empty
+    value: ${{ steps.final.outputs.plan-path }}
+  result-path:
+    description: Relative path to action-result.json, or empty on Phase A failure
+    value: ${{ steps.final.outputs.result-path }}
+  report-path:
+    description: Relative path to report.md, or empty on Phase A failure
+    value: ${{ steps.final.outputs.report-path }}
+  artifacts-path:
+    description: Relative output-directory root, or empty on Phase A failure
+    value: ${{ steps.final.outputs.artifacts-path }}
+  comment-status:
+    description: Sticky comment delivery status
+    value: ${{ steps.final.outputs.comment-status }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+      with:
+        python-version: "3.12"
+
+    - name: Bootstrap Action venv
+      id: bootstrap
+      shell: bash
+      run: |
+        set -euo pipefail
+        ACTION_VENV="$(mktemp -d "${RUNNER_TEMP}/gac-action-venv.XXXXXX")"
+        python -m venv "${ACTION_VENV}"
+        "${ACTION_VENV}/bin/python" -m pip install --upgrade pip
+        "${ACTION_VENV}/bin/python" -m pip install "${{ github.action_path }}"
+        echo "action-python=${ACTION_VENV}/bin/python" >> "${GITHUB_OUTPUT}"
+
+    - name: Run governance orchestration
+      id: governance-run
+      shell: bash
+      env:
+        # Intentionally omit github-token / GITHUB_TOKEN / GH_TOKEN / INPUT_GITHUB_TOKEN.
+        GITHUB_WORKSPACE: ${{ github.workspace }}
+      run: |
+        set -euo pipefail
+        "${{ steps.bootstrap.outputs.action-python }}" -I -m governance.github_ci run \
+          --config "${{ inputs.config }}" \
+          --profile "${{ inputs.profile }}" \
+          --operation "${{ inputs.operation }}" \
+          --output-format "${{ inputs.output-format }}" \
+          --fail-on-policy-error "${{ inputs.fail-on-policy-error }}" \
+          --output-directory "${{ inputs.output-directory }}" \
+          --plan-path "${{ inputs.plan-path }}" \
+          --pr-comment "${{ inputs.pr-comment }}"
+
+    - name: Emit annotations and comment state
+      id: comment-state
+      if: ${{ !cancelled() }}
+      shell: bash
+      env:
+        PHASE_A_FAILED: ${{ steps.governance-run.outputs.phase-a-failed }}
+        ANNOTATIONS_PATH: ${{ steps.governance-run.outputs.annotations-path }}
+        PR_COMMENT: ${{ inputs.pr-comment }}
+        INPUT_TOKEN_NONEMPTY: ${{ inputs.github-token != '' }}
+        GITHUB_EVENT_NAME: ${{ github.event_name }}
+        GITHUB_EVENT_PATH: ${{ github.event_path }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        GITHUB_WORKSPACE: ${{ github.workspace }}
+      run: |
+        set -euo pipefail
+        "${{ steps.bootstrap.outputs.action-python }}" -I -m governance.github_ci emit-annotations-and-comment-state
+
+    - name: Publish sticky PR comment
+      id: governance-comment
+      if: ${{ !cancelled() && steps.comment-state.outputs.comment-eligibility == 'requested' && inputs.github-token != '' }}
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        COMMENT_ELIGIBILITY: ${{ steps.comment-state.outputs.comment-eligibility }}
+        REPORT_PATH: ${{ steps.governance-run.outputs.report-path }}
+        GITHUB_WORKSPACE: ${{ github.workspace }}
+        GITHUB_API_URL: ${{ github.api_url }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        GITHUB_EVENT_PATH: ${{ github.event_path }}
+        GITHUB_EVENT_NAME: ${{ github.event_name }}
+      run: |
+        set -euo pipefail
+        "${{ steps.bootstrap.outputs.action-python }}" -I -m governance.github_ci comment
+
+    - name: Finalize Action outputs
+      id: final
+      if: ${{ !cancelled() }}
+      shell: bash
+      env:
+        PHASE_A_FAILED: ${{ steps.governance-run.outputs.phase-a-failed }}
+        DESIRED_EXIT_CODE: ${{ steps.governance-run.outputs.desired-exit-code }}
+        COMMENT_STATUS_STATE: ${{ steps.comment-state.outputs.comment-status }}
+        COMMENT_ELIGIBILITY: ${{ steps.comment-state.outputs.comment-eligibility }}
+        COMMENT_STATUS_PUBLISHER: ${{ steps.governance-comment.outputs.comment-status }}
+        FAIL_ON_POLICY_ERROR: ${{ inputs.fail-on-policy-error }}
+        GOV_CONTRACT_VERSION: ${{ steps.governance-run.outputs.contract-version }}
+        GOV_STATUS: ${{ steps.governance-run.outputs.status }}
+        GOV_VALIDATION_STATUS: ${{ steps.governance-run.outputs.validation-status }}
+        GOV_POLICY_STATUS: ${{ steps.governance-run.outputs.policy-status }}
+        GOV_POLICY_VIOLATION_COUNT: ${{ steps.governance-run.outputs.policy-violation-count }}
+        GOV_POLICY_ERROR_COUNT: ${{ steps.governance-run.outputs.policy-error-count }}
+        GOV_POLICY_WARNING_COUNT: ${{ steps.governance-run.outputs.policy-warning-count }}
+        GOV_PLAN_STATUS: ${{ steps.governance-run.outputs.plan-status }}
+        GOV_CREATE_COUNT: ${{ steps.governance-run.outputs.create-count }}
+        GOV_UPDATE_COUNT: ${{ steps.governance-run.outputs.update-count }}
+        GOV_UNCHANGED_COUNT: ${{ steps.governance-run.outputs.unchanged-count }}
+        GOV_REMOTE_ONLY_COUNT: ${{ steps.governance-run.outputs.remote-only-count }}
+        GOV_WRITES_PERFORMED: ${{ steps.governance-run.outputs.writes-performed }}
+        GOV_PLAN_PATH: ${{ steps.governance-run.outputs.plan-path }}
+        GOV_RESULT_PATH: ${{ steps.governance-run.outputs.result-path }}
+        GOV_REPORT_PATH: ${{ steps.governance-run.outputs.report-path }}
+        GOV_ARTIFACTS_PATH: ${{ steps.governance-run.outputs.artifacts-path }}
+      run: |
+        set -euo pipefail
+        "${{ steps.bootstrap.outputs.action-python }}" -I -m governance.github_ci finalize
+
+    - name: Final failure gate
+      if: ${{ !cancelled() }}
+      shell: bash
+      env:
+        FINAL_EXIT_CODE: ${{ steps.final.outputs.final-exit-code }}
+      run: |
+        set +e
+        "${{ steps.bootstrap.outputs.action-python }}" -I -m governance.github_ci fail-gate
+        exit $?

@@ -35,6 +35,7 @@ where = ["src"]
 "governance.config_contract.schemas" = ["*.json"]
 "governance.policy.schemas" = ["*.json"]
 "governance.plans.schemas" = ["*.json"]
+"governance.github_ci.schemas" = ["*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

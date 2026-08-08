@@ -1,0 +1,31 @@
+# Deterministic blocked-policy fixture for GitHub Action CI smoke.
+# Paths are relative to this file's directory.
+schema_version: "1"
+
+sources:
+  - id: primary
+    provider: postgresql
+    config:
+      source_name: governance-demo
+      connection:
+        database_url_env: DATABASE_URL
+
+targets:
+  - id: collibra
+    provider: collibra
+    config:
+      mode_env: COLLIBRA_MODE
+      mapping:
+        path: mapping.json
+      auth:
+        base_url_env: COLLIBRA_BASE_URL
+        username_env: COLLIBRA_USERNAME
+        password_env: COLLIBRA_PASSWORD
+
+artifacts:
+  inventory_path: artifacts/metadata-inventory.json
+  snapshot_path: artifacts/governance-snapshot.json
+
+policies:
+  files:
+    - policies/tables-require-owner.yaml

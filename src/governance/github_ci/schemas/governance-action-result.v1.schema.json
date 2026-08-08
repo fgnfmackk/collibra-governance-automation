@@ -1,0 +1,172 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:collibra-governance-automation:schema:governance-action-result:1",
+  "title": "Governance Action result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "result_schema",
+    "result_version",
+    "status",
+    "operation",
+    "failure_code",
+    "validation",
+    "policy",
+    "plan",
+    "execution",
+    "consistency"
+  ],
+  "properties": {
+    "result_schema": {
+      "type": "string",
+      "const": "governance-action-result"
+    },
+    "result_version": {
+      "type": "string",
+      "const": "1"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["passed", "blocked", "failed"]
+    },
+    "operation": {
+      "type": "string",
+      "enum": ["validate", "check", "plan"]
+    },
+    "failure_code": {
+      "type": ["string", "null"],
+      "enum": [
+        null,
+        "configuration_failed",
+        "policy_blocked",
+        "operational_failure",
+        "inputs_changed_during_run",
+        "action_contract_invalid"
+      ]
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "cli_exit_code", "result_path"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["not_run", "passed", "failed"]
+        },
+        "cli_exit_code": {
+          "type": ["integer", "null"]
+        },
+        "result_path": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "cli_exit_code",
+        "violation_count",
+        "error_count",
+        "warning_count",
+        "result_path"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["not_run", "passed", "blocked", "failed"]
+        },
+        "cli_exit_code": {
+          "type": ["integer", "null"]
+        },
+        "violation_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "error_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "warning_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "result_path": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "cli_exit_code",
+        "create_count",
+        "update_count",
+        "unchanged_count",
+        "remote_only_count",
+        "plan_path",
+        "result_path"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["not_run", "generated", "blocked", "failed"]
+        },
+        "cli_exit_code": {
+          "type": ["integer", "null"]
+        },
+        "create_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "update_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unchanged_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "remote_only_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "plan_path": {
+          "type": ["string", "null"]
+        },
+        "result_path": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "writes_performed"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "const": "not_requested"
+        },
+        "writes_performed": {
+          "type": "integer",
+          "const": 0
+        }
+      }
+    },
+    "consistency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["not_applicable", "passed", "failed"]
+        }
+      }
+    }
+  }
+}
